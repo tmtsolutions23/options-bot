@@ -82,21 +82,21 @@ class ScannerBot(discord.Client):
             await interaction.response.defer(ephemeral=False)
             today_str = datetime.now(tz=ET).strftime("%Y-%m-%d")
 
-            # Find open position matching setup_number for today
+            # C5 fix: match by setup_number only — no date filter — so multi-day swing
+            # trades can be closed on a different day than they were opened.
+            # If multiple matches exist (e.g. same number reused), pick the most recent.
             open_positions = await self.db.get_open_positions()
-            matched = [
-                p for p in open_positions
-                if p["setup_number"] == setup_number and p["scan_date"] == today_str
-            ]
+            matched = [p for p in open_positions if p["setup_number"] == setup_number]
 
             if not matched:
                 await interaction.followup.send(
-                    f"No open position found for setup #{setup_number} today ({today_str})."
+                    f"No open position found for setup #{setup_number}."
                 )
                 return
 
-            pos = matched[0]
-            await self.db.close_position(pos["id"], pnl)
+            # Most recent = highest id (auto-increment)
+            pos = max(matched, key=lambda p: p["id"])
+            await self.db.close_position(pos["id"], pnl, close_date=today_str)
 
             equity = await self.db.get_equity()
             sign = "+" if pnl >= 0 else ""
@@ -269,6 +269,9 @@ class ScannerBot(discord.Client):
             )
 
         msg = await channel.send("\n".join(lines))
+        # I7 fix: clear previous scan entries so the dict doesn't grow unbounded;
+        # only the latest scan message needs to be tracked for reaction handling.
+        self.scan_results.clear()
         self.scan_results[msg.id] = setups[:9]
 
         # Add number reactions

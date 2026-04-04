@@ -8,7 +8,7 @@ DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 DISCORD_CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID", "0"))
 
 # --- Database ---
-DB_PATH = os.environ.get("DB_PATH", "scanner.db")
+DB_PATH = os.environ.get("DB_PATH", "/data/scanner.db")
 
 # --- Equity ---
 STARTING_EQUITY = float(os.environ.get("STARTING_EQUITY", "250.0"))

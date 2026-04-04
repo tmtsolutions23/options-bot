@@ -20,7 +20,10 @@ def fetch_daily_ohlcv(tickers: list[str], period: str = "3mo") -> dict[str, pd.D
             if data.empty:
                 return result
             if len(tickers) == 1:
-                result[tickers[0]] = data.dropna()
+                # C3 fix: lowercase column names for single-ticker path, same as multi-ticker
+                df = data.dropna()
+                df.columns = [c.lower() for c in df.columns]
+                result[tickers[0]] = df
             else:
                 for ticker in tickers:
                     try:
@@ -69,10 +72,12 @@ def fetch_sector_relative_strength() -> dict[str, float]:
     result = {}
     for sector_name, etf in SECTOR_ETFS.items():
         try:
+            # C4 fix: yf.download without group_by="ticker" groups columns by field name,
+            # so the correct access pattern is data["Close"][etf], not data[etf]["Close"].
             if len(etf_tickers) == 1:
                 closes = data["Close"]
             else:
-                closes = data[etf]["Close"] if etf in data.columns.get_level_values(0) else data[(etf, "Close")]
+                closes = data["Close"][etf]
             if len(closes) >= 5:
                 ret = (closes.iloc[-1] - closes.iloc[-5]) / closes.iloc[-5] * 100
                 result[sector_name] = float(ret)

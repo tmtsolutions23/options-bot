@@ -19,12 +19,13 @@ class StateDB:
             await self.db.close()
 
     async def _create_tables(self):
+        # C1 fix: split CREATE TABLE statements from parameterized INSERT OR IGNORE
+        # to prevent SQL injection via string formatting of STARTING_EQUITY.
         await self.db.executescript("""
             CREATE TABLE IF NOT EXISTS equity (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 amount REAL NOT NULL
             );
-            INSERT OR IGNORE INTO equity (id, amount) VALUES (1, {starting});
 
             CREATE TABLE IF NOT EXISTS trades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,8 +64,14 @@ class StateDB:
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 count INTEGER NOT NULL DEFAULT 0
             );
-            INSERT OR IGNORE INTO consecutive_losses (id, count) VALUES (1, 0);
-        """.format(starting=STARTING_EQUITY))
+        """)
+        # Parameterized inserts — safe from injection
+        await self.db.execute(
+            "INSERT OR IGNORE INTO equity (id, amount) VALUES (1, ?)", (STARTING_EQUITY,)
+        )
+        await self.db.execute(
+            "INSERT OR IGNORE INTO consecutive_losses (id, count) VALUES (1, 0)"
+        )
         await self.db.commit()
 
     async def get_equity(self) -> float:
@@ -170,7 +177,7 @@ class StateDB:
             rows = await cur.fetchall()
             return [dict(row) for row in rows]
 
-    async def close_position(self, position_id: int, pnl: float):
+    async def close_position(self, position_id: int, pnl: float, close_date: str | None = None):
         async with self.db.execute(
             "SELECT * FROM open_positions WHERE id = ?", (position_id,)
         ) as cur:
@@ -178,8 +185,11 @@ class StateDB:
         if not pos:
             return
         pos = dict(pos)
+        # C2 fix: use close_date (today) rather than the position's scan_date so
+        # multi-day swing P&L is recorded on the day it was actually closed.
+        trade_date = close_date if close_date is not None else pos["scan_date"]
         await self.log_trade(
-            date=pos["scan_date"],
+            date=trade_date,
             setup_number=pos["setup_number"],
             ticker=pos["ticker"],
             strategy=pos["strategy"],
