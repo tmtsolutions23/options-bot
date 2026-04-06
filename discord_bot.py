@@ -254,10 +254,13 @@ class ScannerBot(discord.Client):
             contract = setup.get("contract")
             contract_str = ""
             if contract:
+                est_tag = "~" if contract.get("estimated") else ""
+                moneyness = contract.get("moneyness", "")
                 contract_str = (
                     f" | {contract['option_type'].upper()} ${contract['strike']} "
-                    f"exp {contract['expiration']} (${contract['cost']:.0f} debit, "
-                    f"δ{contract['delta']:.2f})"
+                    f"{moneyness} exp {contract['expiration']} "
+                    f"({est_tag}${contract['cost']:.0f} debit, "
+                    f"δ{contract['delta']:.2f}, IV {contract['iv']:.0%})"
                 )
             tag = f" [{setup.get('tag', '')}]" if setup.get("tag") else ""
             day_trade_flag = " 📅 DAY TRADE" if setup.get("is_day_trade") else ""
