@@ -177,33 +177,21 @@ class ScannerBot(discord.Client):
                 f"Max concurrent positions: {tier['max_concurrent']}"
             )
 
+        @self.tree.command(name="scan", description="Run a fresh scan now")
+        async def cmd_scan(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=False)
+            await self._execute_scan(interaction.channel, source="On-Demand Scan")
+
     # ------------------------------------------------------------------ #
     #  Scheduled morning scan                                              #
     # ------------------------------------------------------------------ #
 
-    @tasks.loop(time=dtime(hour=SCAN_HOUR, minute=SCAN_MINUTE, tzinfo=ET))
-    async def morning_scan(self):
+    async def _execute_scan(self, channel, source: str = "Morning Scan"):
+        """Core scan logic shared by scheduled morning_scan and /scan command."""
         now = datetime.now(tz=ET)
-        # Weekdays only (Monday=0 … Friday=4)
-        if now.weekday() > 4:
-            return
-
-        channel = self.get_channel(DISCORD_CHANNEL_ID)
-        if channel is None:
-            logger.warning("Scan channel %d not found.", DISCORD_CHANNEL_ID)
-            return
-
         today_str = now.strftime("%Y-%m-%d")
         today = now.date()
 
-        # Monday: post weekly summary then save new week start equity
-        if now.weekday() == 0:
-            await self._post_weekly_summary(channel, today)
-            equity = await self.db.get_equity()
-            week_key = today.strftime("%Y-%m-%d")
-            await self.db.save_week_start_equity(week_key, equity)
-
-        # Gather async state before handing off to thread
         equity = await self.db.get_equity()
         week_monday = today - timedelta(days=today.weekday())
         week_key = week_monday.strftime("%Y-%m-%d")
@@ -228,7 +216,7 @@ class ScannerBot(discord.Client):
             return
 
         await channel.send(
-            f"**Pre-market scan starting** — {today_str}\n"
+            f"**{source} starting** — {today_str}\n"
             f"Equity: ${equity:.2f} | PDT remaining: {pdt_remaining}"
         )
 
@@ -248,7 +236,7 @@ class ScannerBot(discord.Client):
 
         # Post results
         budget = calc_debit_budget(equity)
-        lines = [f"**Morning Scan — {today_str}** | Budget/trade: ${budget:.2f}\n"]
+        lines = [f"**{source} — {today_str}** | Budget/trade: ${budget:.2f}\n"]
         for i, setup in enumerate(setups[:9]):
             emoji = NUMBER_EMOJIS[i]
             contract = setup.get("contract")
@@ -272,14 +260,33 @@ class ScannerBot(discord.Client):
             )
 
         msg = await channel.send("\n".join(lines))
-        # I7 fix: clear previous scan entries so the dict doesn't grow unbounded;
-        # only the latest scan message needs to be tracked for reaction handling.
         self.scan_results.clear()
         self.scan_results[msg.id] = setups[:9]
 
         # Add number reactions
         for i in range(min(len(setups), 9)):
             await msg.add_reaction(NUMBER_EMOJIS[i])
+
+    @tasks.loop(time=dtime(hour=SCAN_HOUR, minute=SCAN_MINUTE, tzinfo=ET))
+    async def morning_scan(self):
+        now = datetime.now(tz=ET)
+        if now.weekday() > 4:
+            return
+
+        channel = self.get_channel(DISCORD_CHANNEL_ID)
+        if channel is None:
+            logger.warning("Scan channel %d not found.", DISCORD_CHANNEL_ID)
+            return
+
+        # Monday: post weekly summary then save new week start equity
+        if now.weekday() == 0:
+            today = now.date()
+            await self._post_weekly_summary(channel, today)
+            equity = await self.db.get_equity()
+            week_key = today.strftime("%Y-%m-%d")
+            await self.db.save_week_start_equity(week_key, equity)
+
+        await self._execute_scan(channel, source="Morning Scan")
 
     @morning_scan.before_loop
     async def before_morning_scan(self):
